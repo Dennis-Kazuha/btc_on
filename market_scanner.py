@@ -3,15 +3,32 @@ import pandas as pd
 import numpy as np
 import time
 from datetime import datetime
+import os
 
 class SmartMarketScanner:
-    def __init__(self):
-        # 1. 初始化三大交易所 (移除 Pionex)
-        self.exchanges = {
-            'binance': ccxt.binance({'options': {'defaultType': 'future'}}),
-            'bybit': ccxt.bybit({'options': {'defaultType': 'future'}}),
-            'okx': ccxt.okx({'options': {'defaultType': 'swap'}}),
-        }
+    def __init__(self, use_mock=False):
+        self.use_mock = use_mock
+        if not use_mock:
+            # 1. 初始化三大交易所 (移除 Pionex)
+            self.exchanges = {
+                'binance': ccxt.binance({
+                    'apiKey': os.getenv('BINANCE_API_KEY'),
+                    'secret': os.getenv('BINANCE_SECRET'),
+                    'options': {'defaultType': 'future'}
+                }),
+                'bybit': ccxt.bybit({
+                    'apiKey': os.getenv('BYBIT_API_KEY'),
+                    'secret': os.getenv('BYBIT_SECRET'),
+                    'options': {'defaultType': 'future'}
+                }),
+                'okx': ccxt.okx({
+                    'apiKey': os.getenv('OKX_API_KEY'),
+                    'secret': os.getenv('OKX_SECRET'),
+                    'options': {'defaultType': 'swap'}
+                }),
+            }
+        else:
+            self.exchanges = {}
         self.history = {} # 用來存歷史費率計算波動率
         print("✅ 智能篩選器啟動：鎖定 Binance, Bybit, OKX")
 
@@ -20,6 +37,9 @@ class SmartMarketScanner:
         [智能篩選] 第一步：只看流動性最好的前 20 大幣種
         避免在冷門幣種上遇到滑點過大的問題。
         """
+        if self.use_mock:
+            return ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT']
+            
         try:
             # 以 Binance 的交易量為基準
             tickers = self.exchanges['binance'].fetch_tickers()
@@ -40,6 +60,9 @@ class SmartMarketScanner:
         [策略核心] 掃描全市場，尋找「長期穩定」且「高報酬」的機會
         (已更新：新增價差與深度計算)
         """
+        if self.use_mock:
+            return self._generate_mock_opportunities()
+
         symbols = self.get_top_volume_symbols()
         opportunities = []
 
@@ -127,6 +150,32 @@ class SmartMarketScanner:
         
         return best_opps
 
+    def _generate_mock_opportunities(self):
+        """生成模擬數據"""
+        mock_symbols = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT']
+        exchanges = ['binance', 'bybit', 'okx']
+        opps = []
+        for symbol in mock_symbols:
+            long_ex = np.random.choice(exchanges)
+            short_ex = np.random.choice([e for e in exchanges if e != long_ex])
+            long_rate = np.random.uniform(-0.0001, 0.0001)
+            short_rate = np.random.uniform(0.0001, 0.0003)
+            diff = short_rate - long_rate
+            apr = diff * 3 * 365 * 100
+            opps.append({
+                'symbol': symbol,
+                'long_ex': long_ex,
+                'long_rate': long_rate,
+                'short_ex': short_ex,
+                'short_rate': short_rate,
+                'apr': apr,
+                'sigma': np.random.uniform(0.00001, 0.0001),
+                'spread_rate': diff,
+                'spread_price': np.random.uniform(-0.05, 0.1),
+                'depth': np.random.uniform(10000, 100000)
+            })
+        return sorted(opps, key=lambda x: x['apr'], reverse=True)
+
     def backtest_strategy(self, symbol, days=30):
         """
         [回測模組] 針對選定的幣種，模擬過去 30 天的 ROI 與 MDD
@@ -152,7 +201,7 @@ class SmartMarketScanner:
         return roi, mdd
 
 if __name__ == "__main__":
-    scanner = SmartMarketScanner()
+    scanner = SmartMarketScanner(use_mock=True)
     opps = scanner.scan_funding_opportunities()
     
     print(f"\n{'幣種':<10} | {'方向':<20} | {'年化報酬':<10} | {'穩定度(σ)':<10}")

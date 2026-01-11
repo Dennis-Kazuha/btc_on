@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "pandas": "^0.0.3",
+    "streamlit": "^2.51.2"
+  }
+}
