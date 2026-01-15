@@ -328,6 +328,7 @@ if opportunities:
             '做空': df['short_ex'].str.upper(),
             '買入價': df['long_price'].map('${:,.2f}'.format),
             '賣出價': df['short_price'].map('${:,.2f}'.format),
+            '結算週期': df['funding_interval'].apply(lambda x: f"{x}h/{int(24/x)}次"),
             '當期費率': (df['rate_diff'] * 100).map('{:.4f}%'.format),
             '年化收益': df['apr'].map('{:.2f}%'.format),
             '價差成本': df['spread'].map('{:.3f}%'.format),
@@ -341,6 +342,13 @@ if opportunities:
                 )
             ),
             '深度': df['depth'].apply(lambda x: f"${x/1000000:.2f}M" if x >= 1000000 else f"${x/1000:.0f}K"),
+            '穩定性': df.apply(
+                lambda row: (
+                    f"⭐ {row.get('funding_analysis', {}).get('stability', {}).get('score', 0)*100:.0f}%" 
+                    if 'funding_analysis' in row and 'stability' in row.get('funding_analysis', {}) 
+                    else "N/A"
+                ), axis=1
+            ),
             '波動率': df['sigma'].map('{:.4f}'.format)
         })
         
@@ -384,6 +392,82 @@ if opportunities:
             .map(highlight_cost, subset=['總成本'])
         
         st.dataframe(styled_opportunities, use_container_width=True, height=600)
+        
+        # ========== 資金費率深度分析 ==========
+        if not df.empty and 'funding_analysis' in df.columns:
+            st.subheader("🔬 資金費率深度分析")
+            
+            # 選擇一個幣種查看詳細分析
+            selected_symbol = st.selectbox(
+                "選擇幣種查看詳細分析",
+                df['symbol'].tolist(),
+                key="funding_analysis_selector"
+            )
+            
+            if selected_symbol:
+                selected_data = df[df['symbol'] == selected_symbol].iloc[0]
+                funding_analysis = selected_data.get('funding_analysis', {})
+                
+                if funding_analysis:
+                    analysis_cols = st.columns(3)
+                    
+                    # 做空方分析
+                    with analysis_cols[0]:
+                        st.markdown("### 📉 做空方（高費率）")
+                        short_data = funding_analysis.get('short', {})
+                        if short_data:
+                            st.metric("溢價指數", f"{short_data.get('premium_index', 0)*100:.4f}%")
+                            st.metric("TWAP溢價", f"{short_data.get('twap_premium', 0)*100:.4f}%")
+                            st.metric("預測費率", f"{short_data.get('predicted_rate', 0)*100:.4f}%")
+                            st.metric("衝擊價差", f"${short_data.get('impact_spread', 0):.2f}")
+                            confidence = short_data.get('confidence', 'N/A')
+                            color = "🟢" if confidence == "高" else "🟡" if confidence == "中" else "🔴"
+                            st.metric("置信度", f"{color} {confidence}")
+                    
+                    # 做多方分析
+                    with analysis_cols[1]:
+                        st.markdown("### 📈 做多方（低費率）")
+                        long_data = funding_analysis.get('long', {})
+                        if long_data:
+                            st.metric("溢價指數", f"{long_data.get('premium_index', 0)*100:.4f}%")
+                            st.metric("TWAP溢價", f"{long_data.get('twap_premium', 0)*100:.4f}%")
+                            st.metric("預測費率", f"{long_data.get('predicted_rate', 0)*100:.4f}%")
+                            st.metric("衝擊價差", f"${long_data.get('impact_spread', 0):.2f}")
+                            confidence = long_data.get('confidence', 'N/A')
+                            color = "🟢" if confidence == "高" else "🟡" if confidence == "中" else "🔴"
+                            st.metric("置信度", f"{color} {confidence}")
+                    
+                    # 穩定性分析
+                    with analysis_cols[2]:
+                        st.markdown("### ⭐ 穩定性評估")
+                        stability = funding_analysis.get('stability', {})
+                        if stability:
+                            score = stability.get('score', 0)
+                            score_pct = score * 100
+                            
+                            # 穩定性評分可視化
+                            if score >= 0.8:
+                                score_label = "🟢 優秀"
+                            elif score >= 0.6:
+                                score_label = "🟡 良好"
+                            else:
+                                score_label = "🔴 一般"
+                            
+                            st.metric("穩定性評分", f"{score_label} {score_pct:.0f}分")
+                            st.metric("做空方波動", f"{stability.get('short_std', 0)*100:.4f}%")
+                            st.metric("做多方波動", f"{stability.get('long_std', 0)*100:.4f}%")
+                            st.metric("費率趨勢", stability.get('trend', 'N/A'))
+                    
+                    # 說明文字
+                    st.info("""
+                    📚 **指標說明**：
+                    - **溢價指數**：合約價格相對現貨的偏離程度（基於衝擊價格計算）
+                    - **TWAP溢價**：時間加權移動平均溢價指數（8小時，5760個樣本）
+                    - **預測費率**：基於溢價指數預測的資金費率
+                    - **衝擊價差**：用標準化交易量市價成交的買賣價差
+                    - **穩定性評分**：0-100分，越高越穩定（基於過去1小時數據）
+                    - **置信度**：預測費率與實際費率的偏差程度
+                    """)
         
         # 機會統計
         opp_stats_cols = st.columns(4)
