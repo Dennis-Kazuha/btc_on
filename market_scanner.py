@@ -56,7 +56,7 @@ class SmartMarketScanner:
             print(f"❌ 初始化失敗: {e}")
     
     def get_top_volume_symbols(self, limit=30) -> List[str]:
-        """獲取高交易量幣種"""
+        """獲取高交易量幣種 (已修復符號過濾問題)"""
         cache_key = 'top_symbols'
         
         if cache_key in self.cache:
@@ -68,29 +68,46 @@ class SmartMarketScanner:
             return ['BTC/USDT', 'ETH/USDT', 'SOL/USDT']
         
         try:
+            # 確保至少有初始化 Binance (作為篩選基準)
             if 'binance' not in self.exchanges:
                 return ['BTC/USDT', 'ETH/USDT']
             
+            # 抓取所有 Ticker
             tickers = self.exchanges['binance'].fetch_tickers()
             
-            valid_tickers = [
-                t for t in tickers.values() 
-                if '/USDT' in t['symbol'] 
-                and 'BUSD' not in t['symbol']
-                and ':USDT' not in t['symbol']
-                and t.get('quoteVolume', 0) > 0
-            ]
+            # [關鍵修正] 
+            # 1. 允許符號中包含 :USDT (因為合約通常長這樣 BTC/USDT:USDT)
+            # 2. 確保是 USDT 結算的合約
+            valid_tickers = []
+            for symbol, t in tickers.items():
+                # 過濾掉非 USDT、BUSD 對、以及沒有成交量的
+                if '/USDT' not in symbol: continue
+                if 'BUSD' in symbol: continue
+                if t.get('quoteVolume', 0) <= 0: continue
+                
+                valid_tickers.append(t)
             
+            # 依成交量排序
             sorted_tickers = sorted(valid_tickers, key=lambda x: x['quoteVolume'], reverse=True)
-            result = [t['symbol'] for t in sorted_tickers[:limit]]
             
+            # 取出符號，並做簡單清洗 (把 :USDT 拿掉以便跨交易所比對)
+            # 例如 BTC/USDT:USDT -> BTC/USDT
+            result = []
+            for t in sorted_tickers[:limit]:
+                clean_symbol = t['symbol'].split(':')[0] 
+                result.append(clean_symbol)
+            
+            # 寫入緩存
             with self.cache_lock:
                 self.cache[cache_key] = (time.time(), result)
             
             return result
+
         except Exception as e:
             print(f"獲取幣種失敗: {e}")
-            return ['BTC/USDT', 'ETH/USDT']
+            # 發生錯誤時的回退機制
+            return ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT']
+      
     
     def _fetch_orderbook_price(self, exchange_name: str, symbol: str, side: str) -> Optional[Dict]:
         """獲取盤口價格"""
